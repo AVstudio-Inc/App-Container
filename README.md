@@ -195,6 +195,10 @@ Endpoints are served at
 `http://{device-ip}:8080/api/remote/`. All endpoints require a Bearer token
 (shown in app settings).
 
+A project can check `window.appcontainer.isOem` (boolean) to detect whether
+it's running on AVS hardware without a network round-trip, and gate hardware
+UI/calls accordingly.
+
 ### Terminal
 
 Execute shell commands on the device. Commands run with a 30-second timeout.
@@ -257,6 +261,16 @@ Response always includes full LED state:
 }
 ```
 
+**JavaScript bridge** — control the LED directly from the web project, no
+token or network round-trip needed:
+```js
+window.appcontainer.gpioBridge.postMessage(JSON.stringify({ action: 'ledOn' }));
+window.appcontainer.gpioBridge.postMessage(JSON.stringify({ action: 'ledOff' }));
+window.appcontainer.gpioBridge.postMessage(JSON.stringify({
+  action: 'ledColor', red: 255, green: 128, blue: 0,
+}));
+```
+
 ### GPIO & Relay
 
 Four pins available via `/dev/gpio_control`:
@@ -276,6 +290,13 @@ POST /api/remote/gpio/read    { "pin": 0 }
 Response:
 ```json
 { "status": "ok", "pin": 2, "level": 1, "ok": true }
+```
+
+**JavaScript bridge** — read/write pins directly from the web project, no
+token or network round-trip needed:
+```js
+window.appcontainer.gpioBridge.postMessage(JSON.stringify({ action: 'write', pin: 2, level: 1 }));
+window.appcontainer.gpioBridge.postMessage(JSON.stringify({ action: 'read', pin: 0 }));
 ```
 
 ### RS-232 / RS-485 Serial
@@ -305,15 +326,13 @@ Read response:
 
 ### Power
 
-Reboot or shut down the device remotely.
+Reboot the device remotely.
 
 ```
 POST /api/remote/reboot       → restarts the device
-POST /api/remote/poweroff      → shuts down the device
 ```
 
-Returns `{ "status": "rebooting" }` or `{ "status": "powering off" }` before
-the device shuts down.
+Returns `{ "status": "rebooting" }` before the device restarts.
 
 ### UDP Send
 
@@ -331,6 +350,18 @@ Response:
 
 Broadcast addresses (`.255` or `255.255.255.255`) are automatically detected
 and sent via `SO_BROADCAST`.
+
+**JavaScript bridge** — send UDP directly from the web project. The Bearer
+token is baked in at injection time, so the project never has to handle it:
+```js
+// Hex-encoded payload:
+window.appcontainer.sendUdp('192.168.1.255', 502, '010600660001A815');
+// Raw string payload (sent as-is, no hex decoding):
+window.appcontainer.sendUdpRaw('192.168.1.255', 502, 'hello');
+```
+Both return a `Promise` resolving to the same JSON shape as the HTTP response
+above, and reject with an `Error` on failure. Requires the Remote API to be
+enabled (same gate as the HTTP endpoint).
 
 ### App Management (AVS-10 / AVS-15 touch panels only)
 
@@ -386,7 +417,7 @@ Authorization: Bearer <token>
 
 Response (`200 OK`):
 ```json
-{ "status": "uninstall requested" }
+{ "status": "uninstalled" }
 ```
 
 **JavaScript bridge** — launch or uninstall from a web project without the Remote API:
@@ -485,7 +516,7 @@ run on the same device. No STUN/TURN required.
 
 | Platform | Link |
 |---|---|
-| iOS (iPhone & iPad) | [App Store](https://apps.apple.com/us/app/avstudio-app-container/id6757149515) |
+| iOS (iPhone & iPad) | [App Store](https://apps.apple.com/ru/app/avstudio-app-container/id6757149515) |
 | Android (phone & tablet) | [Google Play](https://play.google.com/store/apps/details?id=com.appcontainer.app) |
 
 Both platforms are functionally equivalent. A 14-day free trial is available on first install — no account required.

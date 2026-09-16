@@ -184,6 +184,121 @@ in a `pageshow` or `DOMContentLoaded` handler if needed.
 
 ---
 
+## Intercom / SIP API for Web Developers
+
+**AVS-10 / AVS-15 touch panels only.** App Container's built-in SIP/intercom
+engine (peer-to-peer calling between panels, or registration with a PBX
+extension) can be driven directly from the hosted web project — placing and
+answering calls, running a "page all panels" broadcast, and reacting to call
+events — without leaving the project's own UI.
+
+Audio/video for an active call is rendered natively by App Container, not
+inside the web page — this API is for *control and status*, the same trust
+level as `window.appcontainer.gpioBridge`. A typical use case is a lobby/
+reception dashboard project that shows an incoming-call banner and a
+Answer/Reject button, calling into the panel's real intercom hardware.
+
+The bridge is available whenever a project is loaded — it does not require
+the technician-only Intercom screen to be open.
+
+### Placing and controlling calls
+
+All methods return a `Promise` resolving to a status snapshot (see
+[Status](#status) below), and never reject except for a malformed bridge
+call — call failures (busy, no answer, network error) are reported via the
+`callFailed` event, not a rejected Promise.
+
+```js
+// Peer-to-peer: call another panel directly by IP
+await window.appcontainer.sip.placeCallToIp('192.168.1.50');
+
+// Via PBX: call a registered extension (requires SIP Server mode, set up
+// once in App Container's own Intercom Setup screen)
+await window.appcontainer.sip.placeCallToExtension('101');
+
+// Answer / reject the currently ringing call
+await window.appcontainer.sip.answer();
+await window.appcontainer.sip.reject();  // sends 486 Busy Here immediately
+
+// Silently dismiss the ring locally — no response sent to the caller, who
+// keeps ringing normally until the call's own ~20s no-answer timeout. No
+// callEnded event fires for it either, then or later.
+await window.appcontainer.sip.ignore();
+
+// End the current call
+await window.appcontainer.sip.hangup();
+
+// Broadcast a call to every panel currently discovered on the local
+// network (peer-to-peer mode only)
+await window.appcontainer.sip.pageAll();
+await window.appcontainer.sip.hangupPageAll();
+
+// Auto-answer every incoming call without ringing first
+await window.appcontainer.sip.setAutoAnswer(true);
+```
+
+### Status
+
+```js
+const status = await window.appcontainer.sip.getStatus();
+```
+
+```json
+{
+  "callStatus": "connected (incoming)",
+  "calleeBusy": false,
+  "callHasVideo": true,
+  "activeCallId": "39279a15-2889-1240-...",
+  "incomingCallerName": "Front Door",
+  "incomingIsBroadcast": false,
+  "registered": true,
+  "pagingActiveCount": 0,
+  "deviceName": "Panel-575afc"
+}
+```
+
+`callStatus` is one of: `idle`, `ringing`, `calling...`, `incoming...`,
+`connected (incoming)`, `connected (outgoing)`, `connected (outgoing via
+PBX)`, `connected (outgoing, legacy audio)`, `connected (outgoing via PBX,
+legacy audio)`, `paging...`, `paging (N active)`, `failed`.
+
+List panels currently discovered on the local network (peer-to-peer mode):
+
+```js
+const panels = await window.appcontainer.sip.listPanels();
+// [{ "name": "Panel-575afc", "host": "192.168.1.50", "port": 5060 }, ...]
+```
+
+### Events
+
+```js
+window.appcontainer.sip.on('incomingCall', ({ callId, callerName, isBroadcast, hasVideo }) => {
+  // Show an incoming-call UI; call answer()/reject() in response.
+});
+
+window.appcontainer.sip.on('callConnected', ({ callId, direction, hasVideo, viaPbx, legacy }) => {
+  // direction: 'incoming' | 'outgoing'
+});
+
+window.appcontainer.sip.on('callEnded', ({ callId, reason }) => {
+  // reason: 'local' | 'remote' | 'remote_bye' | 'rejected' | 'timeout'
+});
+
+window.appcontainer.sip.on('callFailed', ({ reason, busy }) => {});
+
+window.appcontainer.sip.on('registrationChanged', ({ registered, lastError }) => {});
+
+window.appcontainer.sip.on('panelFound', ({ name, host, port }) => {});
+window.appcontainer.sip.on('panelLost', ({ name }) => {});
+
+window.appcontainer.sip.on('pagingStatusChanged', ({ activeCount }) => {});
+
+// Unsubscribe:
+window.appcontainer.sip.off('incomingCall', myHandler);
+```
+
+---
+
 ## Remote Hardware API
 
 Hardware control features — terminal shell, GPIO & relay pins, LED indicator,

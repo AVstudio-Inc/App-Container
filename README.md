@@ -38,6 +38,7 @@ The embedded WebView runs with full JavaScript support, unrestricted media autop
 
 - Self-signed and expired SSL certificates are accepted — essential for local network deployments
 - `fetch` and `XMLHttpRequest` calls to external hosts are transparently proxied through the on-device server, resolving mixed-content and CORS issues with no changes to the project
+- `navigator.mediaDevices.getUserMedia()` works like it does in a regular browser — the first call prompts the standard system camera/microphone permission dialog; once granted, later calls don't re-prompt
 
 ### Remote Management API
 When enabled, a management interface is available at `http://{device-ip}:8080/manage` — accessible from any browser on the same local network.
@@ -161,6 +162,17 @@ window.appcontainer.streamBridge.postMessage(JSON.stringify({ action: 'close', i
 window.appcontainer.streamBridge.postMessage(JSON.stringify({ action: 'closeAll' }));
 ```
 
+#### Mute / volume
+
+```js
+window.appcontainer.streamBridge.postMessage(JSON.stringify({ action: 'mute', id: 'cam1' }));
+window.appcontainer.streamBridge.postMessage(JSON.stringify({ action: 'unmute', id: 'cam1' }));
+window.appcontainer.streamBridge.postMessage(JSON.stringify({ action: 'volume', id: 'cam1', volume: 0.5 }));
+```
+
+`streamBridge` is fire-and-forget (no return value) — there's no query for
+current mute/volume state, so a project should track what it last set.
+
 #### Multiple simultaneous streams
 
 Each stream requires a unique `id`. There is no built-in limit on the number of simultaneous streams,
@@ -186,17 +198,22 @@ in a `pageshow` or `DOMContentLoaded` handler if needed.
 
 ## Intercom / SIP API for Web Developers
 
-**AVS-10 / AVS-15 touch panels only.** App Container's built-in SIP/intercom
-engine (peer-to-peer calling between panels, or registration with a PBX
-extension) can be driven directly from the hosted web project — placing and
-answering calls, running a "page all panels" broadcast, and reacting to call
-events — without leaving the project's own UI.
+**Android only** — both [AVS-10 / AVS-15 touch panels](https://avstudio.app/products/avs-touch-panel/)
+and the standard Android app (not currently available on iOS). App
+Container's built-in SIP/intercom engine (peer-to-peer calling between
+panels or phones/tablets, or registration with a PBX extension) can be
+driven directly from the hosted web project — placing and answering calls
+(including video), running a "page all panels" broadcast, muting the local
+mic, and reacting to call events — without leaving the project's own UI.
 
-Audio/video for an active call is rendered natively by App Container, not
-inside the web page — this API is for *control and status*, the same trust
-level as `window.appcontainer.gpioBridge`. A typical use case is a lobby/
-reception dashboard project that shows an incoming-call banner and a
-Answer/Reject button, calling into the panel's real intercom hardware.
+Audio always renders natively, never inside the web page. Video can too —
+this API is for *control and status*, the same trust level as
+`window.appcontainer.gpioBridge` — but a project can also request a native
+video window positioned over its own layout (see [Video windows](#video-windows)
+below), the same interaction model as the Native Player. A typical use case
+is a lobby/reception dashboard project that shows an incoming-call banner
+and a Answer/Reject button, calling into the device's real intercom
+engine.
 
 The bridge is available whenever a project is loaded — it does not require
 the technician-only Intercom screen to be open.
@@ -235,6 +252,13 @@ await window.appcontainer.sip.hangupPageAll();
 
 // Auto-answer every incoming call without ringing first
 await window.appcontainer.sip.setAutoAnswer(true);
+
+// Mute/unmute this device's own microphone during a call — only affects
+// WebRTC calls (peer-to-peer or PBX), not a legacy (2N/plain PBX
+// extension) call, which never has a local mic track to toggle. Current
+// state is reflected in getStatus()'s micMuted field.
+await window.appcontainer.sip.setMicMuted(true);
+await window.appcontainer.sip.setMicMuted(false);
 ```
 
 ### Status
@@ -253,7 +277,8 @@ const status = await window.appcontainer.sip.getStatus();
   "incomingIsBroadcast": false,
   "registered": true,
   "pagingActiveCount": 0,
-  "deviceName": "Panel-575afc"
+  "deviceName": "Panel-575afc",
+  "micMuted": false
 }
 ```
 
@@ -296,6 +321,42 @@ window.appcontainer.sip.on('pagingStatusChanged', ({ activeCount }) => {});
 // Unsubscribe:
 window.appcontainer.sip.off('incomingCall', myHandler);
 ```
+
+### Video windows
+
+Same interaction model as the Native Player (`streamBridge`): request a
+native video window positioned over a placeholder `<div>`, which App
+Container keeps in sync via the div's bounding rect. Nothing appears until
+requested — safe by default for existing audio-only integrations — and
+both windows are closed automatically when the call ends, so a project
+re-requests them (typically from a `callConnected` handler) for its next
+call rather than managing their lifecycle itself.
+
+```js
+// target: 'remote' (the far end) or 'local' (this device's own camera).
+// Either divId or rect (fractional, like streamBridge.open) works.
+window.appcontainer.sip.on('callConnected', ({ hasVideo }) => {
+  if (!hasVideo) return;
+  window.appcontainer.sip.showVideo({ target: 'remote', divId: 'remote-div' });
+  window.appcontainer.sip.showVideo({ target: 'local', divId: 'local-div' });
+});
+
+// Re-resolve position after scroll/resize, same ResizeObserver pattern as
+// streamBridge — pass divId/rect again each time:
+new ResizeObserver(() => {
+  window.appcontainer.sip.resizeVideo({ target: 'remote', divId: 'remote-div' });
+}).observe(document.getElementById('remote-div'));
+
+// Hide one window, or both if target is omitted — rarely needed, since
+// callEnded/callFailed already clear both automatically:
+window.appcontainer.sip.hideVideo({ target: 'local' });
+window.appcontainer.sip.hideVideo({});
+```
+
+The window renders whatever the active call is actually using — WebRTC
+(panel-to-panel) or legacy (2N, plain PBX extension) — a project never
+needs to know which; it's positioned but empty/black until that call's
+video is actually ready.
 
 ---
 

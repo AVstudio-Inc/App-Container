@@ -259,6 +259,11 @@ await window.appcontainer.sip.setAutoAnswer(true);
 // state is reflected in getStatus()'s micMuted field.
 await window.appcontainer.sip.setMicMuted(true);
 await window.appcontainer.sip.setMicMuted(false);
+
+// Device call volume (0..callMaxVolume from getStatus()) — applies to both
+// WebRTC and legacy (2N/PBX) calls alike, since it's a device audio stream
+// level, not per-track.
+await window.appcontainer.sip.setCallVolume(5);
 ```
 
 ### Status
@@ -278,7 +283,9 @@ const status = await window.appcontainer.sip.getStatus();
   "registered": true,
   "pagingActiveCount": 0,
   "deviceName": "Panel-575afc",
-  "micMuted": false
+  "micMuted": false,
+  "callVolume": 4,
+  "callMaxVolume": 7
 }
 ```
 
